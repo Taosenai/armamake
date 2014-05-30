@@ -179,4 +179,7 @@ trash
 tmr_configwriter.tlog
 *.sdf
 
-sample_project\release
+sample_project/release
+make.cache
+sample_project/make.cfg
+sample_project/make.py
