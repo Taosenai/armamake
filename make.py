@@ -30,7 +30,7 @@
 
 ###############################################################################
 
-__version__ = "0.2dev-noaddonbuilder"
+__version__ = "0.21dev-noaddonbuilder"
 
 import sys
 
@@ -171,12 +171,12 @@ def find_bi_tools():
 
 	# These have to be here if Arma 3 Tools is installed correctly.
 
-	if not os.path.isfile("P:\AddonBuilder.exe") or not os.path.isfile("P:\DSSignFile\DSSignFile.exe"):
+	if not os.path.isfile("P:\AddonBuilder.exe") or not os.path.isfile("P:\DSSignFile\DSSignFile.exe") or not os.path.isfile("P:\DSSignFile\DSCreateKey.exe"):
 		raise Exception("BadTools","Arma 3 Tools are not installed correctly or the P: drive needs to be created.")
 	else:
-		print("Found Addon Builder.\nFound DSSignFile.")
+		print("Found Addon Builder.\nFound DSSignFile.\nFound DSCreateKey.")
 
-	return ["P:\AddonBuilder.exe", "P:\DSSignFile\DSSignFile.exe"]
+	return ["P:\AddonBuilder.exe", "P:\DSSignFile\DSSignFile.exe", "P:\DSSignFile\DSCreateKey.exe"]
 
 def find_depbo_tools():
 	"""Use registry entries to find DePBO-based tools."""
@@ -264,15 +264,17 @@ def main(argv):
 	release_version = 0 # Version of release
 	use_pboproject = True # Default to pboProject build tool
 	make_target = "DEFAULT" # Which section in make.cfg to use for the build
+	new_key = False
 
 	# Parse arguments
 	if "help" in argv or "-h" in argv or "--help" in argv:
 		print ("""
-make.py [help] [test] [force] [release <version>] [module name] [module name] [...]
+make.py [help] [test] [force] [key <name>] [target <name>] [release <version>] [module name] [module name] [...]
 test -- Copy result to Arma 3.
 release <version> -- Make archive with <version>.
 force -- Ignore cache and build all.
 target <name> -- Use rules in make.cfg under heading [<name>] rather than default [Make]
+key <name> -- Use key in working directory with <name> to sign. If it does not exist, create key.
 
 If module names are specified, only those modules will be built.""")
 		sys.exit(0)
@@ -299,6 +301,12 @@ If module names are specified, only those modules will be built.""")
 		argv.remove(make_target)
 		force_build = True
 
+	if "key" in argv:
+		new_key = True
+		key_name = argv[argv.index("key") + 1]
+		argv.remove("key")
+		argv.remove(key_name)
+
 	# Get the directory the make script is in.
 	make_root = os.path.dirname(os.path.realpath(__file__))
 	os.chdir(make_root)
@@ -322,7 +330,7 @@ If module names are specified, only those modules will be built.""")
 		# Manual list of modules to build for a complete build
 		modules = cfg.get(make_target, "modules", fallback=None)
 		# Parse it out
-		if modules is not None:
+		if modules:
 			modules = [x.strip() for x in modules.split(',')]
 		else:
 			modules = []
@@ -339,6 +347,9 @@ If module names are specified, only those modules will be built.""")
 		# Release/build directory, relative to script dir
 		release_dir = cfg.get(make_target, "release_dir", fallback="release")
 
+		# Project PBO file prefix (files are renamed to prefix_name.pbo)
+		pbo_name_prefix = cfg.get(make_target, "pbo_name_prefix", fallback=None)
+
 	except:
 		raise
 		print_error("Could not parse make.cfg.")
@@ -353,11 +364,13 @@ If module names are specified, only those modules will be built.""")
 	try:
 		tools = find_bi_tools()
 		binpbo = tools[0]
+		dssignfile = tools[1]
+		dscreatekey = tools[2]
+
 	except:
 		print_error("Arma 3 Tools are not installed correctly or the P: drive has not been created.")
 		sys.exit(1)
 
-	dssignfile = tools[1]
 	if build_tool == "pboproject":
 		try:
 			depbo_tools = find_depbo_tools()
@@ -391,6 +404,36 @@ If module names are specified, only those modules will be built.""")
 			if os.path.isfile(config_path) and not path in ignore:
 				modules.append(path)
 
+	# Make the key specified from command line if necessary.
+	if new_key:
+		if not os.path.isfile(os.path.join(make_root, key_name + ".biprivatekey")):
+			print_green("\nRequested key does not exist.")
+			ret = subprocess.call([dscreatekey, key_name]) # Created in make_root
+			if ret == 0:
+				print_blue("Created: " + os.path.join(make_root, key_name + ".biprivatekey"))
+			else:
+				print_error("Failed to create key!")
+
+			try:
+				print_blue("Copying public key to release directory.")
+
+				try:
+					os.makedirs(os.path.join(make_root, release_dir, "Keys"))
+				except:
+					pass
+
+				shutil.copyfile(os.path.join(make_root, key_name + ".bikey"), os.path.join(make_root, release_dir, "Keys", key_name + ".bikey"))
+
+			except:
+				raise
+				print_error("Could not copy key to release directory.")
+
+		else:
+			print_green("\nNOTE: Using key " + os.path.join(make_root, key_name + ".biprivatekey"))
+
+		key = os.path.join(make_root, key_name + ".biprivatekey")
+
+
 	# For each module, prep files and then build.
 	for module in modules:
 		print_green("\nMaking " + module + "-"*max(1, (60-len(module))))
@@ -412,19 +455,36 @@ If module names are specified, only those modules will be built.""")
 				# Skip everything else
 				continue
 
+		# Only do this if the project isn't stored directly on the work drive.
+		if make_root != work_drive:
+			try:
+				# Remove old work drive version (ignore errors)
+				shutil.rmtree(os.path.join(work_drive, prefix, module), True)
+
+				# Copy module to the work drive
+				shutil.copytree(module, os.path.join(work_drive, prefix, module))
+
+			except:
+				raise
+				print_error("ERROR: Could not copy module to work drive. Does the module exist?")
+				input("Press Enter to continue...")
+				print("Resuming build...")
+				continue
+		else:
+			print("WARNING: Module is stored on work drive (" + work_drive + "). Be careful -- BI Tools can clear this unexpectedly!")
+
 		try:
-			# Remove old work drive version (ignore errors)
-			shutil.rmtree(os.path.join(work_drive, prefix, module), True)
-
-			# Copy module to the work drive
-			shutil.copytree(module, os.path.join(work_drive, prefix, module))
-
 			# Remove the old pbo, key, and log
 			old = os.path.join(make_root, release_dir, project, "Addons", module) + "*"
 			files = glob.glob(old)
 			for f in files:
 				os.remove(f)
 
+			if pbo_name_prefix:
+				old = os.path.join(make_root, release_dir, project, "Addons", pbo_name_prefix+module) + "*"
+				files = glob.glob(old)
+				for f in files:
+					os.remove(f)
 		except:
 			raise
 			print_error("ERROR: Could not copy module to work drive. Does the module exist?")
@@ -449,12 +509,23 @@ If module names are specified, only those modules will be built.""")
 				# Call pboProject
 				os.chdir("P:\\")
 				ret = subprocess.call([pboproject, "-P", os.path.join(work_drive, prefix, module), "+Engine=Arma3", "-Noisy", "-X", "+Clean", "+Mod="+os.path.join(make_root, release_dir, project), "-Key"])
+
+				# Prettyprefix rename the PBO if requested.
+				if pbo_name_prefix:
+					try:
+						os.rename(os.path.join(make_root, release_dir, project, "Addons", module+".pbo"), os.path.join(make_root, release_dir, project, "Addons", pbo_name_prefix+module+".pbo"))
+					except:
+						raise
+						print_error("Could not rename built PBO with prefix.")
 				
 				if ret == 0:
 					# Sign result
-					if key is not None:
+					if key:
 						print("Signing with " + key + ".")
-						ret = subprocess.call([dssignfile, key, os.path.join(make_root, release_dir, project, "Addons", module + ".pbo")])
+						if pbo_name_prefix:
+							ret = subprocess.call([dssignfile, key, os.path.join(make_root, release_dir, project, "Addons", pbo_name_prefix + module + ".pbo")])
+						else:
+							ret = subprocess.call([dssignfile, key, os.path.join(make_root, release_dir, project, "Addons", module + ".pbo")])
 						
 						if ret == 0:
 							build_successful = True
@@ -490,8 +561,8 @@ If module names are specified, only those modules will be built.""")
 	with open(os.path.join(make_root, "make.cache"), 'w') as f:
 		f.write(cache_out)
 
-	# Delete the pboproject temp files
-	if build_tool == "pboproject":
+	# Delete the pboproject temp files if building a release.
+	if make_release and build_tool == "pboproject":
 		try:
 			shutil.rmtree(os.path.join(make_root, release_dir, project, "temp"), True)
 		except:
