@@ -316,7 +316,7 @@ If module names are specified, only those modules will be built.""")
 		cfg.read(os.path.join(make_root, "make.cfg"))
 
 		# Project name (with @ symbol)
-		project = cfg.get(make_target, "project", fallback="@MYPROJECT")
+		project = cfg.get(make_target, "project", fallback="@"+os.path.basename(os.getcwd()))
 
 		# Private key path
 		key = cfg.get(make_target, "key", fallback=None)
