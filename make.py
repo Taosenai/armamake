@@ -30,7 +30,7 @@
 
 ###############################################################################
 
-__version__ = "0.21dev-noaddonbuilder"
+__version__ = "0.3dev"
 
 import sys
 
@@ -166,17 +166,25 @@ if sys.platform == "win32":
 	  SetConsoleTextAttribute(stdout_handle, color)
 ###############################################################################
 
-def find_bi_tools():
+def find_bi_tools(work_drive):
 	"""Find BI tools."""
 
-	# These have to be here if Arma 3 Tools is installed correctly.
-
-	if not os.path.isfile("P:\AddonBuilder.exe") or not os.path.isfile("P:\DSSignFile\DSSignFile.exe") or not os.path.isfile("P:\DSSignFile\DSCreateKey.exe"):
+	reg = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
+	try:
+		k = winreg.OpenKey(reg, r"Software\bohemia interactive\arma 3 tools")
+		arma3tools_path = winreg.QueryValueEx(k, "path")[0]
+		winreg.CloseKey(k)
+	except:
 		raise Exception("BadTools","Arma 3 Tools are not installed correctly or the P: drive needs to be created.")
-	else:
-		print("Found Addon Builder.\nFound DSSignFile.\nFound DSCreateKey.")
 
-	return ["P:\AddonBuilder.exe", "P:\DSSignFile\DSSignFile.exe", "P:\DSSignFile\DSCreateKey.exe"]
+	addonbuilder_path = os.path.join(arma3tools_path, "AddonBuilder.exe")
+	dssignfile_path = os.path.join(arma3tools_path, "DSSignFile", "DSSignFile.exe")
+	dscreatekey_path = os.path.join(arma3tools_path, "DSSignFile", "DSCreateKey.exe")
+
+	if os.path.isfile(addonbuilder_path) and os.path.isfile(dssignfile_path) and os.path.isfile(dscreatekey_path):
+		return [addonbuilder_path, dssignfile_path, dscreatekey_path]
+	else:
+		raise Exception("BadTools","Arma 3 Tools are not installed correctly or the P: drive needs to be created.")
 
 def find_depbo_tools():
 	"""Use registry entries to find DePBO-based tools."""
@@ -221,7 +229,9 @@ def color(color):
 		elif color == "blue":
 			set_text_attr(FOREGROUND_BLUE | get_text_attr() & 0x0070 | FOREGROUND_INTENSITY)
 		elif color == "reset":
-			set_text_attr(FOREGROUND_GREY | get_text_attr() & 0x0070 | FOREGROUND_INTENSITY)
+			set_text_attr(FOREGROUND_GREY | get_text_attr() & 0x0070)
+		elif color == "grey":
+			set_text_attr(FOREGROUND_GREY | get_text_attr() & 0x0070)
 	else :
 		if color == "green":
 			sys.stdout.write('\033[92m')
@@ -264,19 +274,41 @@ def main(argv):
 	release_version = 0 # Version of release
 	use_pboproject = True # Default to pboProject build tool
 	make_target = "DEFAULT" # Which section in make.cfg to use for the build
-	new_key = False
+	new_key = False # Make a new key and use it to sign?
+	quiet = False # Suppress output from build tool?
 
 	# Parse arguments
 	if "help" in argv or "-h" in argv or "--help" in argv:
 		print ("""
-make.py [help] [test] [force] [key <name>] [target <name>] [release <version>] [module name] [module name] [...]
+make.py [help] [test] [force] [key <name>] [target <name>] [release <version>]
+        [module name] [module name] [...]
+
 test -- Copy result to Arma 3.
 release <version> -- Make archive with <version>.
 force -- Ignore cache and build all.
-target <name> -- Use rules in make.cfg under heading [<name>] rather than default [Make]
-key <name> -- Use key in working directory with <name> to sign. If it does not exist, create key.
+target <name> -- Use rules in make.cfg under heading [<name>] rather than 
+   default [Make]
+key <name> -- Use key in working directory with <name> to sign. If it does not 
+   exist, create key.
+quiet -- Suppress command line output from build tool.
 
-If module names are specified, only those modules will be built.""")
+If module names are specified, only those modules will be built.
+
+Examples:
+   make.py force test 
+      Build all modules (ignoring cache) and copy the mod folder to the Arma 3 
+      directory.
+   make.py mymodule_gun
+      Only build the module named 'mymodule_gun'.
+   make.py force key MyNewKey release 1.0
+      Build all modules (ignoring cache), sign them with NewKey, and pack them 
+      into a zip file for release with version 1.0.
+
+
+If a file called $NOBIN$ is found in the module directory, that module will not be binarized.
+
+See the make.cfg file for additional build options.
+""")
 		sys.exit(0)
 
 	if "force" in argv:
@@ -306,6 +338,10 @@ If module names are specified, only those modules will be built.""")
 		key_name = argv[argv.index("key") + 1]
 		argv.remove("key")
 		argv.remove(key_name)
+
+	if "quiet" in argv:
+		quiet = True
+		argv.remove("quiet")
 
 	# Get the directory the make script is in.
 	make_root = os.path.dirname(os.path.realpath(__file__))
@@ -342,7 +378,7 @@ If module names are specified, only those modules will be built.""")
 		work_drive = cfg.get(make_target, "work_drive",  fallback="P:\\")
 
 		# Which build tool should we use?
-		build_tool = cfg.get(make_target, "build_tool", fallback="pboproject").lower()
+		build_tool = cfg.get(make_target, "build_tool", fallback="addonbuilder").lower()
 
 		# Release/build directory, relative to script dir
 		release_dir = cfg.get(make_target, "release_dir", fallback="release")
@@ -362,8 +398,8 @@ If module names are specified, only those modules will be built.""")
 
 	# Find the tools we need.
 	try:
-		tools = find_bi_tools()
-		binpbo = tools[0]
+		tools = find_bi_tools(work_drive)
+		addonbuilder = tools[0]
 		dssignfile = tools[1]
 		dscreatekey = tools[2]
 
@@ -456,7 +492,8 @@ If module names are specified, only those modules will be built.""")
 				continue
 
 		# Only do this if the project isn't stored directly on the work drive.
-		if make_root != work_drive:
+		# Split the path at the drive name and see if they are on the same drive (usually P:)
+		if os.path.splitdrive(make_root)[0] != os.path.splitdrive(work_drive)[0]:
 			try:
 				# Remove old work drive version (ignore errors)
 				shutil.rmtree(os.path.join(work_drive, prefix, module), True)
@@ -471,7 +508,7 @@ If module names are specified, only those modules will be built.""")
 				print("Resuming build...")
 				continue
 		else:
-			print("WARNING: Module is stored on work drive (" + work_drive + "). Be careful -- BI Tools can clear this unexpectedly!")
+			print("WARNING: Module is stored on work drive (" + work_drive + ").")
 
 		try:
 			# Remove the old pbo, key, and log
@@ -508,7 +545,81 @@ If module names are specified, only those modules will be built.""")
 			try:
 				# Call pboProject
 				os.chdir("P:\\")
-				ret = subprocess.call([pboproject, "-P", os.path.join(work_drive, prefix, module), "+Engine=Arma3", "-Noisy", "-X", "+Clean", "+Mod="+os.path.join(make_root, release_dir, project), "-Key"])
+
+				if os.path.isfile(os.path.join(work_drive, prefix, module, "$NOBIN$")):
+					print_error("$NOBIN$ not supported yet for this build tool!")
+
+				cmd = [pboproject, "-P", os.path.join(work_drive, prefix, module), "+Engine=Arma3", "-Noisy", "-X", "+Clean", "+Mod="+os.path.join(make_root, release_dir, project), "-Key"]
+
+				color("grey")
+				if quiet:
+					devnull = open(os.devnull, 'w')
+					ret = subprocess.call(cmd, stdout=devnull)
+					devnull.close()
+				else:
+					ret = subprocess.call(cmd)
+				color("reset")
+
+				# Prettyprefix rename the PBO if requested.
+				if pbo_name_prefix:
+					try:
+						os.rename(os.path.join(make_root, release_dir, project, "Addons", module+".pbo"), os.path.join(make_root, release_dir, project, "Addons", pbo_name_prefix+module+".pbo"))
+					except:
+						raise
+						print_error("Could not rename built PBO with prefix.")
+				
+				if ret == 0:
+					# Sign result
+					if key:
+						print("Signing with " + key + ".")
+						if pbo_name_prefix:
+							ret = subprocess.call([dssignfile, key, os.path.join(make_root, release_dir, project, "Addons", pbo_name_prefix + module + ".pbo")])
+						else:
+							ret = subprocess.call([dssignfile, key, os.path.join(make_root, release_dir, project, "Addons", module + ".pbo")])
+						
+						if ret == 0:
+							build_successful = True
+					else:
+						build_successful = True
+
+				if not build_successful:
+					print_error("Module not successfully built/signed.")
+					input("Press Enter to continue...")
+					print ("Resuming build...")
+					continue
+
+				# Back to the root	
+				os.chdir(make_root)
+
+			except:
+				raise
+				print_error("Could not run Addon Builder.")
+				input("Press Enter to continue...")
+				print ("Resuming build...")
+				continue
+
+		elif build_tool== "addonbuilder":
+			# Detect $NOBIN$ and do not binarize if found.
+			if os.path.isfile(os.path.join(work_drive, prefix, module, "$NOBIN$")):
+				do_binarize = False
+				print("$NOBIN$ file found in module, packing only.")
+			else:
+				do_binarize = True
+			try:
+				# Call AddonBuilder
+				os.chdir("P:\\")
+
+				cmd = [addonbuilder, os.path.join(work_drive, prefix, module), os.path.join(make_root, release_dir, project, "Addons"), "-clear", "-project="+work_drive]
+				if not do_binarize:
+					cmd.append("-packonly")
+
+				if quiet:
+					devnull = open(os.devnull, 'w')
+					ret = subprocess.call(cmd, stdout=devnull)
+					devnull.close()
+				else:
+					ret = subprocess.call(cmd)
+				color("reset")
 
 				# Prettyprefix rename the PBO if requested.
 				if pbo_name_prefix:
@@ -540,13 +651,11 @@ If module names are specified, only those modules will be built.""")
 
 			except:
 				raise
-				print_error("Could not run pboProject.")
+				print_error("Could not run Addon Builder.")
 				input("Press Enter to continue...")
 				print ("Resuming build...")
 				continue
-
-		elif build_tool== "addonbuilder":
-			print_error("Addon Builder is not currently usable.")
+			
 		else:
 			print_error("Unknown build_tool " + build_tool + "!")
 
