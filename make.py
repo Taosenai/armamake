@@ -432,7 +432,7 @@ class Make:
 		adjusted_modules = []
 		module_path_relpath = os.path.relpath(self.make_root, self.project_root)
 		for module in modules:
-			adjusted_modules.append(os.path.join(module_path_relpath, module))
+			adjusted_modules.append(os.path.normpath(os.path.join(module_path_relpath, module)))
 
 		self.modules = adjusted_modules
 
@@ -521,7 +521,7 @@ class Make:
 		# For each module, prep files and then build.
 		for module in self.modules:
 			if os.path.isdir(os.path.join(self.project_root, module)):
-				print_green("-- Making " + os.path.abspath(module) + " " + "-"*max(1, (68-len(os.path.abspath(module)))))
+				print_green("-- Making " + module + " " + "-"*max(1, (68-len(module))))
 
 				# Cache check
 				if module in self.cache:
@@ -571,6 +571,7 @@ class Make:
 					print("Resuming build...")
 					continue
 
+				print_blue("Source: " + os.path.join(self.project_root, module))
 				print_blue("Destination: " + os.path.join(self.release_dir, self.project, "Addons"))
 				
 				# Make destination folder (if needed)
@@ -584,11 +585,11 @@ class Make:
 					if self.build_tool == "pboproject":
 						try:
 							# Detect $NOBIN$ and use MakePBO instead of pboProject if found.
-							if os.path.isfile(os.path.join(self.project_root, module, "$NOBIN$")):
+							if os.path.isfile(os.path.abspath(os.path.join(self.project_root, module, "$NOBIN$"))):
 								print_green("$NOBIN$ file found in module, packing only.")
-								cmd = [self.makepbo, "-P","-A","-L","-N","-G", os.path.join(self.project_root, module), os.path.join(self.release_dir, self.project, "Addons")]
+								cmd = [self.makepbo, "-P","-A","-L","-N","-G", os.path.abspath(os.path.join(self.project_root, module)), os.path.join(self.release_dir, self.project, "Addons")]
 							else:
-								cmd = [self.pboproject, "-P", os.path.join(self.project_root, module), "+Engine=Arma3", "-Noisy", "+Strip", "-X", "+Clean", "-Workspace=" + self.project_root, "+Mod=" + os.path.join(self.release_dir, self.project), "-Key"]
+								cmd = [self.pboproject, "-P", os.path.abspath(os.path.join(self.project_root, module)), "+Engine=Arma3", "-Noisy", "+Strip", "-X", "+Clean", "-Workspace=" + self.project_root, "+Mod=" + os.path.join(self.release_dir, self.project), "-Key"]
 
 							color("grey")
 							ret = subprocess.call(cmd)
