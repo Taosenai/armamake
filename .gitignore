@@ -183,3 +183,5 @@ sample_project/release
 make.cache
 sample_project/make.cfg
 sample_project/make.py
+
+*.biprivatekey

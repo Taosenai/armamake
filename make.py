@@ -218,7 +218,6 @@ target <name> -- Use rules in make.cfg under heading [<name>] rather than
    default [Make]
 key <name> -- Use key in working directory with <name> to sign. If it does not 
    exist, create key.
-quiet -- Suppress command line output from build tool.
 
 If module names are specified, only those modules will be built.
 
@@ -680,6 +679,7 @@ def main(argv):
 
 	# Get the directory the make script is in.
 	make_root = os.path.dirname(os.path.realpath(__file__))
+	os.chdir(make_root)
 
 	# Default behaviors of command line switches
 	target = "DEFAULT" # Which section in make.cfg to use for the build
@@ -723,10 +723,6 @@ def main(argv):
 		key_name = argv[argv.index("key") + 1]
 		argv.remove("key")
 		argv.remove(key_name)
-
-	if "quiet" in argv:
-		quiet = True
-		argv.remove("quiet")
 
 	# Check for specific modules to build from command line (left over in argv).
 	if len(argv) > 1 and not release:
