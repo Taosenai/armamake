@@ -326,13 +326,14 @@ class Make:
 		except:
 			raise
 
-		addonbuilder_path = os.path.join(arma3tools_path, "AddonBuilder.exe")
+		addonbuilder_path = os.path.join(arma3tools_path, "AddonBuilder", "AddonBuilder.exe")
 		dssignfile_path = os.path.join(arma3tools_path, "DSSignFile", "DSSignFile.exe")
 		dscreatekey_path = os.path.join(arma3tools_path, "DSSignFile", "DSCreateKey.exe")
 
 		if os.path.isfile(addonbuilder_path) and os.path.isfile(dssignfile_path) and os.path.isfile(dscreatekey_path):
 			return [addonbuilder_path, dssignfile_path, dscreatekey_path]
 		else:
+			print_error("Tools not found at %s %s %s" % (addonbuilder_path, dssignfile_path, dscreatekey_path))
 			raise IOError
 
 	def find_depbo_tools(self):
