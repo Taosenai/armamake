@@ -282,6 +282,11 @@ class Make:
 
 			# Project build root. Packing starts from this point for prefix creation. Default is make root.
 			self.project_root = os.path.normpath(cfg.get(self.target, "project_root", fallback=self.make_root))
+			self.project_root = os.path.abspath(self.project_root)
+
+			# Module root. Location of addon folders. Default is project root.
+			self.module_root = os.path.normpath(cfg.get(self.target, "module_root", fallback=self.project_root))
+			self.module_root = os.path.abspath(self.module_root)
 
 			# Private key path
 			self.key = cfg.get(self.target, "key", fallback=None)
@@ -307,6 +312,7 @@ class Make:
 
 			# Absolute path to output directory. Default is relative to working directory.
 			self.release_dir = os.path.normpath(cfg.get(self.target, "release_dir", fallback=os.path.join(self.make_root, "release")))
+			self.release_dir = os.path.abspath(self.release_dir)
 
 			# Project PBO file prefix (files are renamed to prefix_name.pbo)
 			self.pbo_name_prefix = cfg.get(self.target, "pbo_name_prefix", fallback=None)
@@ -404,25 +410,25 @@ class Make:
 			cache = {}
 
 	def autodetect_modules(self):
-		"""Autodetect what directories in the make_root are buildable modules and add them to the modules list."""
+		"""Autodetect what directories in the module_root are buildable modules and add them to the modules list."""
 		modules = []
 
-		# Look in make_root
-		root, dirs, files = next(os.walk(self.make_root))
+		# Look in module_root
+		root, dirs, files = next(os.walk(self.module_root))
 		for d in dirs:
 			if "config.cpp" in os.listdir(os.path.join(root, d)) and not d in self.ignore:
 				modules.append(d)
 
-		# Look in make_root\addons if it exists
-		if os.path.isdir(os.path.join(self.make_root, "addons")):
-			root, dirs, files = next(os.walk(os.path.join(self.make_root, "addons")))
+		# Look in module_root\addons if it exists
+		if os.path.isdir(os.path.join(self.module_root, "addons")):
+			root, dirs, files = next(os.walk(os.path.join(self.module_root, "addons")))
 			for d in dirs:
 				if "config.cpp" in os.listdir(os.path.join(root, d)) and not d in self.ignore:
 					modules.append(os.path.join("addons", d))
 
-		# Look in make_root\modules if it exists
-		if os.path.isdir(os.path.join(self.make_root, "modules")):
-			root, dirs, files = next(os.walk(os.path.join(make_root, "modules")))
+		# Look in module_root\modules if it exists
+		if os.path.isdir(os.path.join(self.module_root, "modules")):
+			root, dirs, files = next(os.walk(os.path.join(module_root, "modules")))
 			for d in dirs:
 				if "config.cpp" in os.listdir(os.path.join(root, d)) and not d in self.ignore:
 					modules.append(os.path.join("modules", d))
@@ -431,9 +437,10 @@ class Make:
 
 		# Adjust found module paths to start from the project_root
 		adjusted_modules = []
-		module_path_relpath = os.path.relpath(self.make_root, self.project_root)
+		module_path_relpath = os.path.relpath(self.module_root, self.make_root)
+		print(module_path_relpath)
 		for module in modules:
-			adjusted_modules.append(os.path.normpath(os.path.join(module_path_relpath, module)))
+			adjusted_modules.append(os.path.abspath(os.path.normpath(os.path.join(module_path_relpath, module))))
 
 		self.modules = adjusted_modules
 
@@ -622,7 +629,21 @@ class Make:
 								except:
 									raise
 							else:
+								if ret != 0:
+									try:
+										error_log = open(os.path.join(self.release_dir, self.project, "temp", pbo_name + "_packing.log"), 'r').readlines();
+
+										print()
+										print_error("Last 5 lines of pboProject log %s:" % (os.path.join(self.release_dir, self.project, "temp", pbo_name + "_packing.log")))
+
+										for line in error_log[-5:]:
+											print(line, end="")
+										print()
+									except:
+										pass
+
 								print_error("Module not successfully built/signed.")
+								failed_count += 1
 								input("Press Enter to continue...")
 								print ("Resuming build...")
 								continue
@@ -651,6 +672,7 @@ class Make:
 
 		# Print report.
 		if success_count + skipped_count > 0:
+			print()
 			print_green("Built %s modules. Skipped %s modules." % (success_count, skipped_count))
 		if failed_count > 0:
 			color("red")
