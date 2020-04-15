@@ -1,7 +1,7 @@
 Arma Make
 ===
 
-Arma Make is a build system for addons made for Arma 3. It is especially suited to large or modular projects which may need multiple build configurations, multiple subsets of modules signed with distinct keys, or other complex features.
+Arma Make is a build system for addons made for Arma 3. It is especially suited to large or modular projects which may need multiple build configurations, multiple subsets of modules signed with distinct keys, or other complex features. It relies on the official AddonBuilder from BI, included in Arma 3 Tools.
 
 Arma Make is written in **Python 3**.
 
@@ -11,9 +11,9 @@ HOWTO
 Copy make.py and make.cfg into the root of your addon workspace. It should look something like this:
 
 	workspace\
-		|-- module1\
-			|-- config.cpp
-			|-- init.sqf
+	|-- module1\
+		|-- config.cpp
+		|-- init.sqf
     	|-- module2\
         	|-- config.cpp
     	|-- make.py
@@ -53,7 +53,7 @@ If you have multiple build targets defined in make.cfg, specify them at build ti
 
 The MIT License
 
-Copyright (c) 2013-2014 Ryan Schultz.
+Copyright (c) 2013-2020 Ryan Schultz.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
