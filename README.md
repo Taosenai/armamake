@@ -1,9 +1,9 @@
-Arma Make
+Armamake
 ===
 
-Arma Make is a build system for addons made for Arma 3. It is especially suited to large or modular projects which may need multiple build configurations, multiple subsets of modules signed with distinct keys, or other complex features. It relies on the official AddonBuilder from BI, included in Arma 3 Tools.
+Armamake is a build system for addons made for Arma 3. It is especially suited to large or modular projects which may need multiple build configurations, multiple subsets of modules signed with distinct keys, or other complex features. However, it works out of the box with no configuration needed for simple projects, even those intended to produce multiple PBOs. It relies on the official AddonBuilder from BI, included in Arma 3 Tools.
 
-Arma Make is written in **Python 3**.
+Armamake is written in **Python 3**.
 
 
 HOWTO
@@ -11,17 +11,16 @@ HOWTO
 Copy make.py and make.cfg into the root of your addon workspace. It should look something like this:
 
 	workspace\
-	|-- module1\
-		|-- config.cpp
-		|-- init.sqf
-    	|-- module2\
-        	|-- config.cpp
-    	|-- make.py
-    	|-- make.cfg
+		| module1\
+			|-- config.cpp
+			|-- init.sqf
+		| module2\
+			|-- config.cpp
+		|-- make.py
+		|-- make.cfg
 
 Open a command prompt here and run:
 		`python make.py help`
-
 
 To build your addon:
 		`python make.py`
