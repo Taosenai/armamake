@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # vim: set fileencoding=utf-8 :
 
-# make.py
-# An Arma 3 addon build system
+# Armamake (make.py)
+"""An Arma 3 addon build system."""
 
 ###############################################################################
 
 # The MIT License (MIT)
 
-# Copyright (c) 2013-2014 Ryan Schultz 
+# Copyright (c) 2013-2020 Ryan Schultz
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,18 +30,13 @@
 
 ###############################################################################
 
-__version__ = "0.4dev-noaddonbuilder"
+__version__ = "0.6"
+# "I shall return." edition
 
 import sys
-
-if sys.version_info[0] == 2:
-	print("Python 3 is required.")
-	sys.exit(1)
-
 import os
 import os.path
 import shutil
-import platform
 import glob
 import subprocess
 import hashlib
@@ -49,10 +44,16 @@ import configparser
 import json
 import traceback
 
+if sys.version_info[0] == 2:
+	print("Python 3 is required.")
+	sys.exit(1)
 if sys.platform == "win32":
 	import winreg
 
 ###############################################################################
+# External code
+###############################################################################
+
 # http://akiscode.com/articles/sha-1directoryhash.shtml
 # Copyright (c) 2009 Stephen Akiki
 # MIT License (Means you can do whatever you want with this)
@@ -60,18 +61,19 @@ if sys.platform == "win32":
 # Error Codes:
 #   -1 -> Directory does not exist
 #   -2 -> General error (see stack traceback)
-def  get_directory_hash(directory):
+def get_directory_hash(directory):
+	"""Returns hash of target directory."""
 	directory_hash = hashlib.sha1()
 	if not os.path.exists (directory):
 		return -1
-	
+
 	try:
-		for root, dirs, files in os.walk(directory):
+		for root, _, files in os.walk(directory):
 			for names in files:
 				path = os.path.join(root, names)
 				try:
 					f = open(path, 'rb')
-				except:
+				except IOError:
 					# You can't open the file for some reason
 					f.close()
 					continue
@@ -79,12 +81,13 @@ def  get_directory_hash(directory):
 				while 1:
 					# Read file in as little chunks
 					buf = f.read(4096)
-					if not buf: break
+					if not buf:
+						break
 					new = hashlib.sha1(buf)
 					directory_hash.update(new.digest())
 				f.close()
 
-	except:
+	except IOError:
 		# Print the stack traceback
 		traceback.print_exc()
 		return -2
@@ -101,26 +104,15 @@ if sys.platform == "win32":
 
 	class COORD(Structure):
 	  """struct in wincon.h."""
-	  _fields_ = [
-		("X", SHORT),
-		("Y", SHORT)]
+	  _fields_ = [("X", SHORT), ("Y", SHORT)]
 
 	class SMALL_RECT(Structure):
 	  """struct in wincon.h."""
-	  _fields_ = [
-		("Left", SHORT),
-		("Top", SHORT),
-		("Right", SHORT),
-		("Bottom", SHORT)]
+	  _fields_ = [("Left", SHORT), ("Top", SHORT), ("Right", SHORT), ("Bottom", SHORT)]
 
 	class CONSOLE_SCREEN_BUFFER_INFO(Structure):
 	  """struct in wincon.h."""
-	  _fields_ = [
-		("dwSize", COORD),
-		("dwCursorPosition", COORD),
-		("wAttributes", WORD),
-		("srWindow", SMALL_RECT),
-		("dwMaximumWindowSize", COORD)]
+	  _fields_ = [("dwSize", COORD), ("dwCursorPosition", COORD), ("wAttributes", WORD), ("srWindow", SMALL_RECT), ("dwMaximumWindowSize", COORD)]
 
 	# winbase.h
 	STD_INPUT_HANDLE = -10
@@ -164,6 +156,7 @@ if sys.platform == "win32":
 	  buffer. Color is a combination of foreground and background color,
 	  foreground and background intensity."""
 	  SetConsoleTextAttribute(stdout_handle, color)
+
 ###############################################################################
 
 def color(color):
@@ -190,51 +183,53 @@ def color(color):
 			sys.stdout.write('\033[0m')
 
 def print_error(msg):
+	"""Print error message."""
 	color("red")
 	print ("ERROR: " + msg)
 	color("reset")
 
 def print_green(msg):
+	"""Print green message."""
 	color("green")
 	print(msg)
 	color("reset")
 
 def print_blue(msg):
+	"""Print blue message."""
 	color("blue")
 	print(msg)
 	color("reset")
 
-###############################################################################
-
 def print_help():
+	"""Prints help info on console usage of this program."""
 	print ("""
 make.py [help] [test] [force] [key <name>] [target <name>] [release <version>]
-        [module name] [module name] [...]
+        [module names ...]
 
-test -- Copy result to Arma 3.
+test -- Copy result to <Arma 3 location>\Mods folder.
 release <version> -- Make archive with <version>.
 force -- Ignore cache and build all.
-target <name> -- Use rules in make.cfg under heading [<name>] rather than 
+target <name> -- Use rules in make.cfg under heading [<name>] rather than
    default [Make]
-key <name> -- Use key in working directory with <name> to sign. If it does not 
+key <name> -- Use key in working directory with <name> to sign. If it does not
    exist, create key.
 
 If module names are specified, only those modules will be built.
 
+If a file called $NOBIN$ is found in the module directory, that module will not be binarized.
+See the make.cfg file for additional build options.
+
+
 Examples:
-   make.py force test 
-      Build all modules (ignoring cache) and copy the mod folder to the Arma 3 
+   make.py force test
+      Build all modules (ignoring cache) and copy the mod folder to the Arma 3
       directory.
    make.py mymodule_gun
       Only build the module named 'mymodule_gun'.
    make.py force key MyNewKey release 1.0
-      Build all modules (ignoring cache), sign them with NewKey, and pack them 
+      Build all modules (ignoring cache), sign them with NewKey, and pack them
       into a zip file for release with version 1.0.
 
-
-If a file called $NOBIN$ is found in the module directory, that module will not be binarized.
-
-See the make.cfg file for additional build options.
 """)
 
 ###############################################################################
@@ -244,85 +239,71 @@ See the make.cfg file for additional build options.
 class Make:
 	"""Main class for building an Arma addon."""
 
-	def __init__(self, make_root, target = "DEFAULT", arg_modules = False, modules = [], test = False, force_build = False, release = False, release_version = 0, new_key = False, key_name = ""):
-			# Construction values (read in via command line)
-			self.make_root = make_root
-			self.target = target
-			self.arg_modules = arg_modules
-			self.modules = modules
-			self.test = test
-			self.force_build = force_build
-			self.release = release
-			self.release_version = release_version
-			self.new_key = new_key
-			self.key_name = key_name
+	def __init__(self, root, target = "DEFAULT", modules = None, release = False, version = None, test = False, force = False, key = None, quiet = True):
+		self.root = root
 
-			# Read values from the config file.
-			self.parse_config()
+		# Constructor parameters
+		self.target = target
+		self.modules = modules
+		self.release = release
+		self.test = test
+		self.force = force
+		self.version = version
+		self.key = key
+		self.quiet = quiet
 
-			# Verify tools
-			self.find_tools()
+		self.find_tools()
+		self.init_cache()
 
-			# Open and read cache if it exists
-			self.init_cache()
+		self.parse_config()
 
-			# Autodetect modules (if requested in config)
-			if self.module_autodetect and not self.arg_modules:
-				self.autodetect_modules()
+		if self.module_autodetect:
+			self.autodetect_modules()
 
 	def parse_config(self):
 		"""Parse make.cfg values."""
-		cfg = configparser.ConfigParser();
+		cfg = configparser.ConfigParser()
 
 		try:
-			cfg.read(os.path.join(self.make_root, "make.cfg"))
+			cfg.read(os.path.join(self.root, "make.cfg"))
 
 			# Project name (with @ symbol)
 			self.project = cfg.get(self.target, "project", fallback="@"+os.path.basename(os.getcwd()))
-
 			# Project build root. Packing starts from this point for prefix creation. Default is make root.
-			self.project_root = os.path.normpath(cfg.get(self.target, "project_root", fallback=self.make_root))
+			self.project_root = os.path.normpath(cfg.get(self.target, "project_root", fallback=self.root))
 			self.project_root = os.path.abspath(self.project_root)
-
 			# Module root. Location of addon folders. Default is project root.
 			self.module_root = os.path.normpath(cfg.get(self.target, "module_root", fallback=self.project_root))
 			self.module_root = os.path.abspath(self.module_root)
-
 			# Private key path
 			self.key = cfg.get(self.target, "key", fallback=None)
-
 			# Should we autodetect modules on a complete build?
 			self.module_autodetect = cfg.getboolean(self.target, "module_autodetect", fallback=True)
-
 			# Manual list of modules to build for a complete build
 			self.config_modules = cfg.get(self.target, "modules", fallback=None)
 			# Parse it out and update self.modules if no modules were specified at init
 			if self.config_modules and len(self.modules) == 0:
 				self.modules = [x.strip() for x in self.config_modules.split(',')]
-			
 			# List of directories to ignore when detecting
 			self.ignore = [x.strip() for x in cfg.get(self.target, "ignore",  fallback="release").split(',')]
 			self.ignore += [".git", ".svn", ".cvs", ".darcs", ".DS_Store"]
-
 			# BI Tools work drive on Windows
 			self.work_drive = cfg.get(self.target, "work_drive",  fallback="P:\\")
-
 			# Which build tool should we use?
-			self.build_tool = cfg.get(self.target, "build_tool", fallback="pboproject").lower()
-
+			self.build_tool = cfg.get(self.target, "build_tool", fallback="addonbuilder")
 			# Absolute path to output directory. Default is relative to working directory.
-			self.release_dir = os.path.normpath(cfg.get(self.target, "release_dir", fallback=os.path.join(self.make_root, "release")))
+			self.release_dir = os.path.normpath(cfg.get(self.target, "release_dir", fallback=os.path.join(self.root, "release")))
 			self.release_dir = os.path.abspath(self.release_dir)
-
 			# Project PBO file prefix (files are renamed to prefix_name.pbo)
 			self.pbo_name_prefix = cfg.get(self.target, "pbo_name_prefix", fallback=None)
+			# Suppress BI Tools console output?
+			self.quiet = cfg.getboolean(self.target, "quiet", fallback=False)
 
 		except:
-			raise
-			print_error("Could not parse make.cfg.")
+			print_error("make.cfg file is required.")
 
-	def find_bi_tools(self):
-		"""Use registry entries to find BI tools."""
+	def find_tools(self):
+		"""Find tools needed to build modules."""
 
 		reg = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
 		try:
@@ -330,6 +311,8 @@ class Make:
 			arma3tools_path = winreg.QueryValueEx(k, "path")[0]
 			winreg.CloseKey(k)
 		except:
+			color("red")
+			print_error("Arma 3 Tools are not installed correctly or the P: drive has not been created.")
 			raise
 
 		addonbuilder_path = os.path.join(arma3tools_path, "AddonBuilder", "AddonBuilder.exe")
@@ -337,108 +320,54 @@ class Make:
 		dscreatekey_path = os.path.join(arma3tools_path, "DSSignFile", "DSCreateKey.exe")
 
 		if os.path.isfile(addonbuilder_path) and os.path.isfile(dssignfile_path) and os.path.isfile(dscreatekey_path):
-			return [addonbuilder_path, dssignfile_path, dscreatekey_path]
+			self.addonbuilder =addonbuilder_path
+			self.dssignfile = dssignfile_path
+			self.dscreatekey = dscreatekey_path
 		else:
-			print_error("Tools not found at %s %s %s" % (addonbuilder_path, dssignfile_path, dscreatekey_path))
-			raise IOError
-
-	def find_depbo_tools(self):
-		"""Use registry entries to find DePBO-based tools."""
-
-		reg = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
-		try:
-			k = winreg.OpenKey(reg, r"Software\Mikero\pboProject")
-			try:
-				pboproject_path = winreg.QueryValueEx(k, "exe")[0]
-				winreg.CloseKey(k)
-			except:
-				print_error("Could not find pboProject.")
-
-			k = winreg.OpenKey(reg, r"Software\Mikero\rapify")
-			try:
-				# Small workaround for registry value glitch with "
-				rapify_path = winreg.QueryValueEx(k, "exe")[0].strip('"')
-				winreg.CloseKey(k)
-			except:
-				print_error("Could not find rapify.")
-
-			k = winreg.OpenKey(reg, r"Software\Mikero\MakePbo")
-			try:
-				makepbo_path = winreg.QueryValueEx(k, "exe")[0].strip('"')
-				winreg.CloseKey(k)
-			except:
-				print_error("Could not find makepbo.")
-		except:
-			raise
-
-		return [pboproject_path, rapify_path, makepbo_path]
-
-	def find_tools(self):
-		"""Find tools needed to build modules."""
-		try:
-			tools = self.find_bi_tools()
-			self.addonbuilder = tools[0]
-			self.dssignfile = tools[1]
-			self.dscreatekey = tools[2]
-		except:
 			color("red")
-			raise Exception("Arma 3 Tools are not installed correctly or the P: drive has not been created.")
-			color("reset")
-
-		# Only needed for pboProject build path.
-		if self.build_tool == "pboproject":
-			try:
-				depbo_tools = self.find_depbo_tools()
-				self.pboproject = depbo_tools[0]
-				self.rapify = depbo_tools[1]
-				self.makepbo = depbo_tools[2]
-			except:
-				color("red")
-				raise Exception("Could not find DePBO tools. Download the needed tools from: https://dev.withsix.com/projects/mikero-pbodll/files. make.py requires pboProject, makepbo, and rapify.")
-				color("reset")
+			print_error("Arma 3 Tools are not installed correctly or the P: drive has not been created.")
+			raise Exception("Tools not found at %s %s %s" % (addonbuilder_path, dssignfile_path, dscreatekey_path))
 
 	def init_cache(self):
 		"""Read or initialize build cache file."""
 		self.cache = {}
 		try:
-			with open(os.path.join(self.make_root, "make.cache"), 'r') as f:
+			with open(os.path.join(self.root, "make.cache"), 'r') as f:
 				cache_raw = f.read()
 
 			self.cache = json.loads(cache_raw)
-		except:
-			print ("No cache found.")
-			cache = {}
+		except IOError:
+			pass
 
 	def autodetect_modules(self):
 		"""Autodetect what directories in the module_root are buildable modules and add them to the modules list."""
 		modules = []
 
 		# Look in module_root
-		root, dirs, files = next(os.walk(self.module_root))
+		root, dirs, _ = next(os.walk(self.module_root))
 		for d in dirs:
 			if "config.cpp" in os.listdir(os.path.join(root, d)) and not d in self.ignore:
 				modules.append(d)
 
 		# Look in module_root\addons if it exists
 		if os.path.isdir(os.path.join(self.module_root, "addons")):
-			root, dirs, files = next(os.walk(os.path.join(self.module_root, "addons")))
+			root, dirs, _ = next(os.walk(os.path.join(self.module_root, "addons")))
 			for d in dirs:
 				if "config.cpp" in os.listdir(os.path.join(root, d)) and not d in self.ignore:
 					modules.append(os.path.join("addons", d))
 
 		# Look in module_root\modules if it exists
 		if os.path.isdir(os.path.join(self.module_root, "modules")):
-			root, dirs, files = next(os.walk(os.path.join(module_root, "modules")))
+			root, dirs, _ = next(os.walk(os.path.join(self.module_root, "modules")))
 			for d in dirs:
 				if "config.cpp" in os.listdir(os.path.join(root, d)) and not d in self.ignore:
 					modules.append(os.path.join("modules", d))
 
-		print_green("Auto-detected %d modules.\n" % len(modules))
+		print_green("Auto-detected %d modules." % len(modules))
 
 		# Adjust found module paths to start from the project_root
 		adjusted_modules = []
-		module_path_relpath = os.path.relpath(self.module_root, self.make_root)
-		print(module_path_relpath)
+		module_path_relpath = os.path.relpath(self.module_root, self.root)
 		for module in modules:
 			adjusted_modules.append(os.path.abspath(os.path.normpath(os.path.join(module_path_relpath, module))))
 
@@ -446,12 +375,12 @@ class Make:
 
 	def make_key(self):
 		"""Create the signing key specified from command line if necessary."""
-		if self.new_key:
-			if not os.path.isfile(os.path.join(self.make_root, self.key_name + ".biprivatekey")):
+		if self.key:
+			if not os.path.isfile(os.path.join(self.root, self.key + ".biprivatekey")):
 				print_green("\nRequested key does not exist.")
-				ret = subprocess.call([self.dscreatekey, self.key_name]) # Created in make_root
+				ret = subprocess.call([self.dscreatekey, self.key],  stdout = subprocess.DEVNULL if self.quiet else None, stderr = subprocess.DEVNULL if self.quiet else None) # Created in root
 				if ret == 0:
-					print_blue("Created: " + os.path.join(self.make_root, self.key_name + ".biprivatekey"))
+					print_blue("Created: " + os.path.join(self.root, self.key + ".biprivatekey"))
 				else:
 					print_error("Failed to create key!")
 
@@ -460,41 +389,40 @@ class Make:
 
 					try:
 						os.makedirs(os.path.join(self.release_dir, "Keys"))
-					except:
+					except IOError:
 						pass
 
-					shutil.copyfile(os.path.join(self.make_root, self.key_name + ".bikey"), os.path.join(self.release_dir, "Keys", self.key_name + ".bikey"))
+					shutil.copyfile(os.path.join(self.root, self.key + ".bikey"), os.path.join(self.release_dir, "Keys", self.key + ".bikey"))
 
 				except:
-					raise
 					print_error("Could not copy key to release directory.\n")
+					raise
 
 			else:
-				print_green("\nNOTE: Using key " + os.path.join(self.make_root, self.key_name + ".biprivatekey\n"))
+				print_green("\nNOTE: Using key " + os.path.join(self.root, self.key + ".biprivatekey\n"))
 
-			self.key = os.path.join(self.make_root, self.key_name + ".biprivatekey")
+			self.key = os.path.join(self.root, self.key + ".biprivatekey")
 
 	def zip_release(self):
 		"""Zip up a successful build."""
 		if self.build_tool == "pboproject":
 			try:
 				shutil.rmtree(os.path.join(self.release_dir, self.project, "temp"), True)
-			except:
-				print_error("ERROR: Could not delete pboProject temp files.")
+			except IOError:
+				print_error("Could not delete pboProject temp files.")
 
-		print_blue("Zipping release: " + self.project + "-" + self.release_version + ".zip")
-		
+		print_blue("Zipping release: " + self.project + "-" + self.version + ".zip")
+
 		try:
 			# Delete all log files
-			for root, dirs, files in os.walk(os.path.join(self.release_dir, self.project, "Addons")):
+			for root, _, files in os.walk(os.path.join(self.release_dir, self.project, "Addons")):
 				for current_file in files:
 					if current_file.lower().endswith("log"):
 						os.remove(os.path.join(root, current_file))
 
 			# Create a zip with the contents of release/ in it
-			shutil.make_archive(self.project + "-" + self.release_version, "zip", os.path.join(self.release_dir))
-		except:
-			raise
+			shutil.make_archive(self.project + "-" + self.version, "zip", os.path.join(self.release_dir))
+		except IOError:
 			print_error("Could not make release.")
 
 	def copy_to_a3(self):
@@ -506,14 +434,14 @@ class Make:
 			k = winreg.OpenKey(reg, r"SOFTWARE\Wow6432Node\Bohemia Interactive\Arma 3")
 			a3_path = winreg.EnumValue(k, 1)[1]
 			winreg.CloseKey(k)
-		except:
+		except IOError:
 			print_error("Could not find Arma 3's directory in the registry.")
 
 		if os.path.exists(a3_path):
 			try:
-				shutil.rmtree(os.path.join(a3_path, self.project), True)
-				shutil.copytree(os.path.join(self.release_dir, self.project), os.path.join(a3_path, self.project))
-			except:
+				shutil.rmtree(os.path.join(a3_path, "Mods", self.project), True)
+				shutil.copytree(os.path.join(self.release_dir, self.project), os.path.join(a3_path, "Mods", self.project))
+			except IOError:
 				print_error("Could not copy files. Is Arma 3 running?")
 
 	def make(self):
@@ -529,25 +457,24 @@ class Make:
 		# For each module, prep files and then build.
 		for module in self.modules:
 			if os.path.isdir(os.path.join(self.project_root, module)):
-				print_green("-- Making " + module + " " + "-"*max(1, (68-len(module))))
+				# Cache check if not force building
+				if not self.force:
+					if module in self.cache:
+						old_sha = self.cache[module]
+					else:
+						old_sha = ""
 
-				# Cache check
-				if module in self.cache:
-					old_sha = self.cache[module]
-				else:
-					old_sha = ""
+					# Hash the module
+					new_sha = get_directory_hash(os.path.join(self.project_root, module))
 
-				# Hash the module
-				new_sha = get_directory_hash(os.path.join(self.project_root, module))
+					# Check if it needs rebuilt
+					# print ("Hash:", new_sha)
+					if old_sha == new_sha:
+							skipped_count += 1
+							# Skip everything else
+							continue
 
-				# Check if it needs rebuilt
-				# print ("Hash:", new_sha)
-				if old_sha == new_sha:
-					if not self.force_build:
-						print("Module has not changed.")
-						skipped_count += 1
-						# Skip everything else
-						continue
+				print_green("Making " + module + " " + "-"*max(1, (71-len(module))))
 
 				# Determine the name and (eventual) path of the output PBO, before prefixing
 				pbo_name = module.split(os.sep)[-1]
@@ -557,7 +484,6 @@ class Make:
 				# Determine prefixed name and path
 				if self.pbo_name_prefix:
 					pbo_prefixed = self.pbo_name_prefix + pbo
-					pbo_prefixed_path = os.path.join(self.release_dir, self.project, "Addons", pbo_prefixed)
 
 				# Remove the old pbo, key, and log
 				try:
@@ -572,35 +498,41 @@ class Make:
 						files = glob.glob(old)
 						for f in files:
 							os.remove(f)
-				except:
-					raise
-					print_error("ERROR: Could not remove old files.")
+				except IOError:
+
+					print_error("Could not remove old files. Are they being used by another program?")
 					input("Press Enter to continue...")
 					print("Resuming build...")
 					continue
 
 				print_blue("Source: " + os.path.join(self.project_root, module))
 				print_blue("Destination: " + os.path.join(self.release_dir, self.project, "Addons"))
-				
+
 				# Make destination folder (if needed)
 				try:
 					os.makedirs(os.path.join(self.release_dir, self.project, "Addons"))
-				except:
+				except IOError:
 					pass
 
 				# Run build tool
 				try:
-					if self.build_tool == "pboproject":
+					if self.build_tool == "addonbuilder":
+						# Create temporary file with include list to feed to Addon Builder
+						include_list = "*.pac;*.paa;*.sqf;*.sqs;*.bikb;*.fsm;*.wss;*.ogg;*.wav;*.fxy;*.csv;*.html;*.lip;*.txt;*.wrp;*.bisurf;*.xml;*.hqf;*.rtm;*.rvmat;*.shp;"
+						with open(os.path.join(self.root, "~make.includes"), "w") as include_file:
+							include_file.write(include_list)
+						include = "-include=%s" % (os.path.join(self.root, "~make.includes"))
+
 						try:
-							# Detect $NOBIN$ and use MakePBO instead of pboProject if found.
+							# Detect $NOBIN$ and only binarize if so
 							if os.path.isfile(os.path.abspath(os.path.join(self.project_root, module, "$NOBIN$"))):
 								print_green("$NOBIN$ file found in module, packing only.")
-								cmd = [self.makepbo, "-P","-A","-L","-N","-G", os.path.abspath(os.path.join(self.project_root, module)), os.path.join(self.release_dir, self.project, "Addons")]
+								cmd = [self.addonbuilder, include, "-packonly", os.path.abspath(os.path.join(self.project_root, module)), os.path.join(self.release_dir, self.project, "Addons")]
 							else:
-								cmd = [self.pboproject, "-P", os.path.abspath(os.path.join(self.project_root, module)), "+Engine=Arma3", "-Noisy", "+Strip", "-X", "+Clean", "-Workspace=" + self.project_root, "+Mod=" + os.path.join(self.release_dir, self.project), "-Key"]
+								cmd = [self.addonbuilder, include, os.path.abspath(os.path.join(self.project_root, module)), os.path.join(self.release_dir, self.project, "Addons")]
 
 							color("grey")
-							ret = subprocess.call(cmd)
+							ret = subprocess.call(cmd,  stdout = subprocess.DEVNULL if self.quiet else None, stderr = subprocess.DEVNULL if self.quiet else None)
 							color("reset")
 
 							if ret == 0 and os.path.isfile(pbo_path):
@@ -611,35 +543,37 @@ class Make:
 											os.rename(pbo_path, os.path.join(self.release_dir, self.project, "Addons", self.pbo_name_prefix + pbo))
 										except:
 											raise Exception("BadPBONamePrefix", "Could not rename PBO with prefix.")
-									
+
 									# Sign result
 									if self.key:
 										print("Signing with " + self.key + ".")
 										if self.pbo_name_prefix:
-											ret = subprocess.call([self.dssignfile, self.key, os.path.join(self.release_dir, self.project, "Addons", self.pbo_name_prefix + pbo)])
+											ret = subprocess.call([self.dssignfile, self.key, os.path.join(self.release_dir, self.project, "Addons", self.pbo_name_prefix + pbo)],  stdout = subprocess.DEVNULL if self.quiet else None, stderr = subprocess.DEVNULL if self.quiet else None)
 										else:
-											ret = subprocess.call([self.dssignfile, self.key, pbo_path])
-										
+											ret = subprocess.call([self.dssignfile, self.key, pbo_path],  stdout = subprocess.DEVNULL if self.quiet else None, stderr = subprocess.DEVNULL if self.quiet else None)
+
 										if ret != 0:
 											raise Exception("BadSign", "Could not sign PBO.")
 
 									# Update the hash for a successfully built module
-									self.cache[module] = new_sha
+									if not self.force:
+										self.cache[module] = new_sha
+
 									success_count += 1
 								except:
 									raise
 							else:
 								if ret != 0:
 									try:
-										error_log = open(os.path.join(self.release_dir, self.project, "temp", pbo_name + "_packing.log"), 'r').readlines();
+										error_log = open(os.path.join(self.release_dir, self.project, "temp", pbo_name + "_packing.log"), 'r').readlines()
 
 										print()
-										print_error("Last 5 lines of pboProject log %s:" % (os.path.join(self.release_dir, self.project, "temp", pbo_name + "_packing.log")))
+										print_error("Last 5 lines of build log %s:" % (os.path.join(self.release_dir, self.project, "temp", pbo_name + "_packing.log")))
 
 										for line in error_log[-5:]:
 											print(line, end="")
 										print()
-									except:
+									except IOError:
 										pass
 
 								print_error("Module not successfully built/signed.")
@@ -647,15 +581,14 @@ class Make:
 								input("Press Enter to continue...")
 								print ("Resuming build...")
 								continue
-						except:
-							raise
-							input("Press Enter to continue...")
+						except IOError:
+							input("An error occurred. Press Enter to continue...")
 							print ("Resuming build...")
 							continue
-					elif self.build_tool == "addonbuilder":
-						print_error("Addon Builder is not a currently supported build tool.")
+					elif self.build_tool == "pboproject":
+						print_error("pboProject is no longer supported as a build tool.")
 					else:
-						print_error("Unknown build tool %s." % build_tool)
+						print_error("Unknown build tool %s." % self.build_tool)
 				except:
 					failed_count += 1
 					raise
@@ -663,17 +596,15 @@ class Make:
 				finally:
 					# Write out the cache state even if there was an exception
 					cache_out = json.dumps(self.cache)
-					with open(os.path.join(self.make_root, "make.cache"), 'w') as f:
+					with open(os.path.join(self.root, "make.cache"), 'w') as f:
 						f.write(cache_out)
 			else:
 				print_error("Module %s does not exist." % module)
 				failed_count += 1
-			print()
 
 		# Print report.
 		if success_count + skipped_count > 0:
-			print()
-			print_green("Built %s modules. Skipped %s modules." % (success_count, skipped_count))
+			print_green("Built %s modules. Skipped %s unchanged modules." % (success_count, skipped_count))
 		if failed_count > 0:
 			color("red")
 			print("%s modules failed to build." % failed_count)
@@ -681,13 +612,17 @@ class Make:
 
 		# Zip up the release dir if requested.
 		if self.release:
-			print()
 			self.zip_release()
 
 		# Copy the files to Arma 3 folder if requested.
 		if self.test:
-			print()
 			self.copy_to_a3()
+
+		# Clean up.
+		try:
+			os.remove(os.path.join(self.root, "~make.includes"))
+		except IOError:
+			pass
 
 ###############################################################################
 ###############################################################################
@@ -695,36 +630,30 @@ class Make:
 
 def main(argv):
 	"""Build an Arma addon suite in a directory from rules in a make.cfg file."""
-	print_blue(("make.py for Arma, v%s\n" % __version__))
+	print_blue(("make for Arma 3, v%s" % __version__))
 
 	if sys.platform != "win32":
 		print_error("Non-Windows platform (Cygwin?). Please re-run from cmd.")
 		sys.exit(1)
 
 	# Get the directory the make script is in.
-	make_root = os.path.dirname(os.path.realpath(__file__))
-	os.chdir(make_root)
-
-	# Default behaviors of command line switches
-	target = "DEFAULT" # Which section in make.cfg to use for the build
-	arg_modules = False # Only build modules on command line?
-	modules = [] # What modules should be built?
-	test = False # Copy to Arma 3 directory?
-	release = False # Make zip file from the release?
-	release_version = 0 # Version of release
-	new_key = False # Make a new key and use it to sign?
-	key_name = "" # Name of the new key?
+	root = os.path.dirname(os.path.realpath(__file__))
+	os.chdir(root)
 
 	# Parse command line switches
 	if "help" in argv or "-h" in argv or "--help" in argv:
 		print_help()
 		sys.exit(0)
 
+	target = "DEFAULT"
+	force = False
+	test = False
+	release = False
+	version = None
+
 	if "force" in argv:
+		force = True
 		argv.remove("force")
-		force_build = True
-	else:
-		force_build = False
 
 	if "test" in argv:
 		test = True
@@ -732,35 +661,30 @@ def main(argv):
 
 	if "release" in argv:
 		release = True
-		release_version = argv[argv.index("release") + 1]
-		argv.remove(release_version)
+		version = argv[argv.index("release") + 1]
+		argv.remove(version)
 		argv.remove("release")
 
 	if "target" in argv:
 		target = argv[argv.index("target") + 1]
 		argv.remove("target")
 		argv.remove(target)
-		force_build = True
 
 	if "key" in argv:
-		new_key = True
-		key_name = argv[argv.index("key") + 1]
+		key = argv[argv.index("key") + 1]
 		argv.remove("key")
-		argv.remove(key_name)
+		argv.remove(key)
 
 	# Check for specific modules to build from command line (left over in argv).
-	if len(argv) > 1 and not release:
-		arg_modules = True
+	if len(argv) > 1:
 		modules = argv[1:]
 
 	# Create a new Make object and execute the build.
 	try:
-		make = Make(make_root, target, arg_modules, modules, test, force_build, release, release_version, new_key, key_name)
-
+		make = Make(root, target = target, force = force, test = test, release = release, version = version)
 		make.make()
 	except:
 		raise
-		sys.exit(1)
 
 if __name__ == "__main__":
 	main(sys.argv)
